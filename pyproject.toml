@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "az-interview-copilot"
+version = "1.0.0"
+description = "Azerbaijani technical-interview copilot: ElevenLabs Scribe v2 Realtime speech recognition + OpenAI streaming answer generation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+dependencies = [
+    "PySide6>=6.9",
+    "websockets>=14",
+    "openai>=1.99,<3",
+    "numpy>=1.26,<3",
+    "keyring>=25.4",
+    "pypdf>=5.1",
+    "python-docx>=1.1",
+    "PyAudioWPatch>=0.2.12 ; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "pytest-cov>=5.0", "pyinstaller>=6.11"]
+
+[project.scripts]
+az-interview-copilot = "copilot.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "live: hits the real ElevenLabs / OpenAI APIs and costs money (opt-in)",
+    "gui: needs a Qt application instance",
+]

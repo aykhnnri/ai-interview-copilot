@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# Secrets — never commit credentials
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+credentials.json
+
+# Personal documents. The app reads a CV / job advert from anywhere on disk;
+# this stops one dropped in the project folder from being committed by reflex.
+/cv.*
+/*.pdf
+/*.docx
+/*.doc
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+*.manifest
+.Python
+
+# Test and coverage artefacts
+.pytest_cache/
+.pytest-tmp/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Environments
+# ---------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+
+# ---------------------------------------------------------------------------
+# Local application state (written at runtime, machine-specific)
+# ---------------------------------------------------------------------------
+*.log
+logs/
+benchmarks/
+settings.json
+
+# ---------------------------------------------------------------------------
+# Editors, tooling and OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.claude/
+*.swp
+*~
+Thumbs.db
+desktop.ini
+.DS_Store

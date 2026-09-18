@@ -1,0 +1,43 @@
+Aysel Məmmədova
+AI / Machine Learning Engineer
+Bakı, Azərbaycan · aysel.mammadova@example.com
+
+HAQQIMDA
+5 illik təcrübəyə malik AI mühəndisiyəm. Son 3 ildə production mühitində LLM
+tətbiqləri qururam. Əsas fokusum RAG sistemləri, agent arxitekturaları və model
+deployment-dir.
+
+İŞ TƏCRÜBƏSİ
+Senior AI Engineer — Aztech Solutions (2023 - indi)
+- Hüquqi sənədlər üzrə RAG pipeline qurdum: pgvector, hybrid search (BM25 +
+  dense retrieval) və cross-encoder reranking. Retrieval quality-ni Recall@10 və
+  MRR metrikləri ilə ölçdüm, qızıl standart dataset üzərində evaluation apardım.
+- Hallucination-u azaltmaq üçün citation-based grounding və confidence
+  threshold tətbiq etdim; faktiki xəta nisbəti 18%-dən 4%-ə düşdü.
+- LangGraph üzərində multi-agent research sistemi hazırladım. Agentlər arasında
+  kommunikasiya shared state və message passing vasitəsilə qurulmuşdu.
+- p95 latency-ni 4.2 saniyədən 1.1 saniyəyə endirdim: streaming, semantic cache
+  və kiçik modellərə routing. Ağır sorğular üçün ayrıca queue qurdum.
+
+ML Engineer — DataLab Baku (2021 - 2023)
+- Python və FastAPI ilə inference API-ləri yazdım, Docker və Kubernetes ilə
+  Azure üzərində deploy etdim.
+- Müştəri churn modeli üçün fine-tuning apardım; AUC 0.71-dən 0.84-ə qalxdı.
+- Async/await əsaslı batch inference pipeline qurdum, throughput 3 dəfə artdı.
+
+BACARIQLAR
+Dillər: Python, SQL, TypeScript
+LLM: OpenAI API, LangChain, LangGraph, prompt engineering, fine-tuning (LoRA)
+Vector DB: pgvector, Qdrant, FAISS
+Infrastruktur: Docker, Kubernetes, Azure, GitHub Actions
+Monitorinq: Prometheus, Grafana, LangSmith
+
+LAYİHƏLƏR
+Azerbaijani Legal RAG — Azərbaycan dilində hüquqi sual-cavab sistemi.
+Multi-agent Research Assistant — LangGraph əsaslı, 4 agentli araşdırma sistemi.
+
+TƏHSİL
+Bakı Dövlət Universiteti — Kompüter Elmləri, Magistr (2019 - 2021)
+
+DİLLƏR
+Azərbaycan (ana dili), İngilis (C1), Rus (B2)

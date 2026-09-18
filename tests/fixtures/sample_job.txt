@@ -1,0 +1,24 @@
+Senior AI Engineer (LLM Platform)
+Şirkət: Nordic FinTech AS · Hibrid, Bakı
+
+VƏZİFƏ HAQQINDA
+Komandamıza production səviyyəsində LLM platforması quracaq Senior AI Engineer
+axtarırıq. Siz RAG sistemlərinin, agent orkestrasiyasının və model evaluation
+infrastrukturunun sahibi olacaqsınız.
+
+TƏLƏBLƏR
+- Python üzrə güclü bilik, async proqramlaşdırma təcrübəsi
+- Production RAG pipeline qurmaq təcrübəsi (retrieval, reranking, evaluation)
+- Vector database təcrübəsi: pgvector, Qdrant və ya oxşar
+- LLM latency və cost optimizasiyası üzrə praktiki təcrübə
+- Docker, Kubernetes və bulud platformaları (Azure üstünlükdür)
+- Multi-agent sistemlər və LangGraph/LangChain ilə tanışlıq
+
+ÖHDƏLİKLƏR
+- RAG pipeline-ın retrieval quality-sini ölçmək və yaxşılaşdırmaq
+- Hallucination riskini azaldan guardrails qurmaq
+- Model evaluation və benchmark infrastrukturu yaratmaq
+- Məlumat təhlükəsizliyi və GDPR uyğunluğunu təmin etmək
+
+TƏKLİF EDİRİK
+Rəqabətli əməkhaqqı, hibrid iş rejimi, konfrans büdcəsi.
