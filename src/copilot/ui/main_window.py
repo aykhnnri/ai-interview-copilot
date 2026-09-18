@@ -1,9 +1,13 @@
 """The main desktop window.
 
-Layout, top to bottom: provider status, listening controls, live transcript,
-the detected question, and the streaming answer with its actions.  Compact mode
-hides everything except the question and the answer and pins the window on top,
-which is what you actually want during a call.
+The answer is the product, so it gets the space and the largest type; every
+other element is deliberately quiet.  Top to bottom: a slim status bar, the
+detected question, the streaming answer, an optional transcript strip, and a
+slim control bar.  Compact mode drops everything except question and answer and
+pins the window above the call.
+
+The window can also be made translucent, which is what makes it usable *over* a
+meeting rather than beside it - see `_apply_opacity`.
 """
 from __future__ import annotations
 
@@ -23,20 +27,20 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSizePolicy,
-    QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import messages as msg
-from ..config import Settings
+from ..config import OPACITY_RANGE, Settings
 from ..core.pipeline import IDLE, LISTENING, PAUSED, CopilotPipeline
 from ..credentials import CredentialStore
 from ..documents.extract import DocumentError, ExtractedDocument, extract_text
 from ..documents.profile import CandidateProfile
 from ..llm.models import get_spec
 from ..llm.openai_client import AnswerResult
+from . import theme
 from .bridge import PipelineBridge
 from .dev_panel import DevPanel
 from .settings_dialog import SettingsDialog
@@ -44,32 +48,10 @@ from .widgets import StatusIndicator
 
 log = logging.getLogger(__name__)
 
-STYLESHEET = """
-QMainWindow, QWidget#Root { background-color: #14161b; }
-QLabel { color: #e6e8ee; }
-QLabel#SectionTitle { color: #8d94a5; font-size: 11px; letter-spacing: 1px; }
-QLabel#Question {
-    color: #ffffff; font-size: 17px; font-weight: 600;
-    padding: 10px 12px; background-color: #1d222c; border-radius: 8px;
-}
-QTextEdit {
-    background-color: #1a1d24; color: #e6e8ee; border: 1px solid #262b35;
-    border-radius: 8px; padding: 10px; selection-background-color: #2f6feb;
-}
-QPushButton {
-    background-color: #242935; color: #e6e8ee; border: 1px solid #333a49;
-    border-radius: 6px; padding: 7px 14px; font-weight: 500;
-}
-QPushButton:hover:enabled { background-color: #2e3542; }
-QPushButton:disabled { color: #5a6172; background-color: #1c2029; }
-QPushButton#Primary { background-color: #2f6feb; border-color: #2f6feb; color: white; }
-QPushButton#Primary:hover:enabled { background-color: #3b7bf5; }
-QPushButton#Danger { background-color: #3a2226; border-color: #5d2b33; }
-QFrame#Card { background-color: #181b22; border: 1px solid #242a35; border-radius: 10px; }
-QProgressBar { background-color: #1a1d24; border: 1px solid #262b35;
-    border-radius: 4px; height: 6px; text-align: center; }
-QProgressBar::chunk { background-color: #3fb950; border-radius: 3px; }
-"""
+#: How far Ctrl+Shift+Up/Down moves the opacity per press.
+OPACITY_STEP = 0.05
+
+QUESTION_PLACEHOLDER = "Sual gözlənilir…"
 
 
 class MainWindow(QMainWindow):
@@ -91,13 +73,15 @@ class MainWindow(QMainWindow):
         self._normal_geometry = None
 
         self.setWindowTitle("AZ Interview Copilot")
-        self.setStyleSheet(STYLESHEET)
-        self.resize(1040, 760)
+        self.apply_theme()
+        self.resize(880, 680)
         self._build_ui()
         self._connect_signals()
         self._restore_documents()
         self._refresh_provider_labels()
         self._apply_always_on_top(self.settings.ui.always_on_top)
+        self._apply_opacity(self.settings.ui.effective_opacity())
+        self.set_transcript_visible(self.settings.ui.show_transcript, persist=False)
         if self.settings.ui.compact_mode:
             self.set_compact(True)
 
@@ -119,137 +103,78 @@ class MainWindow(QMainWindow):
         root = QWidget(objectName="Root")
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
-        outer.setContentsMargins(14, 12, 14, 12)
-        outer.setSpacing(10)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(8)
 
-        outer.addWidget(self._build_header())
+        outer.addWidget(self._build_status_bar())
+        outer.addWidget(self._build_answer(), 1)
+        outer.addWidget(self._build_transcript())
         outer.addWidget(self._build_controls())
-
-        self.body_splitter = QSplitter(Qt.Vertical)
-        self.body_splitter.setChildrenCollapsible(False)
-        self.transcript_card = self._build_transcript()
-        self.body_splitter.addWidget(self.transcript_card)
-        self.body_splitter.addWidget(self._build_answer())
-        self.body_splitter.setSizes([260, 420])
-        outer.addWidget(self.body_splitter, 1)
-
-        self.status_label = QLabel(msg.STATUS_IDLE)
-        self.status_label.setObjectName("SectionTitle")
-        outer.addWidget(self.status_label)
 
         self._build_menu()
 
-    def _build_header(self) -> QWidget:
-        card = QFrame(objectName="Card")
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(24)
+    def _build_status_bar(self) -> QWidget:
+        """Two dots, the document state and three quiet buttons - one line."""
+        bar = QFrame(objectName="Bar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(12, 7, 8, 7)
+        layout.setSpacing(14)
 
-        stt_box = QVBoxLayout()
-        stt_box.setSpacing(2)
-        title = QLabel("Speech Recognition")
-        title.setObjectName("SectionTitle")
-        self.stt_indicator = StatusIndicator("ElevenLabs Scribe v2 Realtime")
-        stt_box.addWidget(title)
-        stt_box.addWidget(self.stt_indicator)
-        layout.addLayout(stt_box)
-
-        llm_box = QVBoxLayout()
-        llm_box.setSpacing(2)
-        title2 = QLabel("Answer Generation")
-        title2.setObjectName("SectionTitle")
-        self.llm_indicator = StatusIndicator("GPT-4.1 Nano")
-        llm_box.addWidget(title2)
-        llm_box.addWidget(self.llm_indicator)
-        layout.addLayout(llm_box)
-
+        self.stt_indicator = StatusIndicator("ElevenLabs Scribe v2 Realtime", compact=True)
+        self.llm_indicator = StatusIndicator("GPT-5.6 Luna", compact=True)
+        layout.addWidget(self.stt_indicator)
+        layout.addWidget(self.llm_indicator)
         layout.addStretch(1)
 
-        doc_box = QVBoxLayout()
-        doc_box.setSpacing(2)
-        doc_title = QLabel("Sənədlər")
-        doc_title.setObjectName("SectionTitle")
         self.documents_label = QLabel("Sənəd yüklənməyib")
-        self.documents_label.setWordWrap(True)
-        self.documents_label.setMaximumWidth(340)
-        doc_box.addWidget(doc_title)
-        doc_box.addWidget(self.documents_label)
-        layout.addLayout(doc_box)
-        self.header_card = card
-        return card
+        self.documents_label.setObjectName("Hint")
+        self.documents_label.setMaximumWidth(280)
+        layout.addWidget(self.documents_label)
 
-    def _build_controls(self) -> QWidget:
-        card = QFrame(objectName="Card")
-        layout = QHBoxLayout(card)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(8)
-
-        self.start_button = QPushButton("Start Listening", objectName="Primary")
-        self.pause_button = QPushButton("Pause Listening")
-        self.stop_button = QPushButton("Stop Listening", objectName="Danger")
-        self.pause_button.setEnabled(False)
-        self.stop_button.setEnabled(False)
-        for button in (self.start_button, self.pause_button, self.stop_button):
+        self.transcript_button = QPushButton("Transkript", objectName="Ghost")
+        self.transcript_button.setCheckable(True)
+        self.transcript_button.setToolTip("Transkripti göstər / gizlət  (Ctrl+T)")
+        self.settings_button = QPushButton("Settings", objectName="Ghost")
+        self.compact_button = QPushButton("Compact", objectName="Ghost")
+        self.compact_button.setCheckable(True)
+        self.compact_button.setToolTip("Yalnız sual və cavab  (Ctrl+Shift+C)")
+        for button in (self.transcript_button, self.settings_button, self.compact_button):
             layout.addWidget(button)
 
-        layout.addSpacing(12)
-        self.level_bar = QProgressBar()
-        self.level_bar.setRange(0, 100)
-        self.level_bar.setValue(0)
-        self.level_bar.setTextVisible(False)
-        self.level_bar.setFixedWidth(120)
-        self.level_bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        layout.addWidget(QLabel("Səs"))
-        layout.addWidget(self.level_bar)
-        layout.addStretch(1)
-
-        self.settings_button = QPushButton("Settings")
-        self.compact_button = QPushButton("Compact")
-        self.compact_button.setCheckable(True)
-        layout.addWidget(self.settings_button)
-        layout.addWidget(self.compact_button)
-        self.controls_card = card
-        return card
-
-    def _build_transcript(self) -> QWidget:
-        card = QFrame(objectName="Card")
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 10, 14, 12)
-        layout.setSpacing(6)
-        title = QLabel("CANLI TRANSKRİPT (AZƏRBAYCAN DİLİ)")
-        title.setObjectName("SectionTitle")
-        layout.addWidget(title)
-
-        self.transcript_view = QTextEdit()
-        self.transcript_view.setReadOnly(True)
-        self.transcript_view.setFont(QFont("Segoe UI", 11))
-        layout.addWidget(self.transcript_view, 1)
-        return card
+        self.header_card = bar
+        return bar
 
     def _build_answer(self) -> QWidget:
+        """Question and answer in one card, with the answer given the room."""
         card = QFrame(objectName="Card")
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 10, 14, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(12)
 
-        title = QLabel("AŞKARLANAN SUAL")
-        title.setObjectName("SectionTitle")
-        layout.addWidget(title)
-        self.question_label = QLabel("—")
-        self.question_label.setObjectName("Question")
+        caption = QLabel("SUAL")
+        caption.setObjectName("SectionTitle")
+        layout.addWidget(caption)
+
+        self.question_label = QLabel(QUESTION_PLACEHOLDER)
+        self.question_label.setObjectName("QuestionEmpty")
         self.question_label.setWordWrap(True)
+        self.question_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.question_label)
 
-        answer_title = QLabel("CAVAB")
-        answer_title.setObjectName("SectionTitle")
-        layout.addWidget(answer_title)
+        # No caption above the answer: it is the biggest text in the window and
+        # sits under the question, so labelling it only adds furniture.
         self.answer_view = QTextEdit()
+        self.answer_view.setObjectName("Answer")
         self.answer_view.setReadOnly(True)
         self.answer_view.setFont(QFont("Segoe UI", 13))
+        self.answer_view.setPlaceholderText(
+            "Cavab burada görünəcək.\n\n"
+            "Müsahib danışmağı bitirdikdə cavab avtomatik yazılmağa başlayır."
+        )
         layout.addWidget(self.answer_view, 1)
 
         row = QHBoxLayout()
-        row.setSpacing(8)
+        row.setSpacing(6)
         self.generate_button = QPushButton("Generate Answer", objectName="Primary")
         self.regenerate_button = QPushButton("Regenerate")
         self.expand_button = QPushButton("Expand Answer")
@@ -261,11 +186,66 @@ class MainWindow(QMainWindow):
             row.addWidget(button)
         row.addStretch(1)
         self.answer_meta = QLabel("")
-        self.answer_meta.setObjectName("SectionTitle")
+        self.answer_meta.setObjectName("Meta")
         row.addWidget(self.answer_meta)
         layout.addLayout(row)
+
         self._set_answer_actions_enabled(False)
+        self.answer_card = card
         return card
+
+    def _build_transcript(self) -> QWidget:
+        """A short strip, not a panel: enough to see what was heard."""
+        card = QFrame(objectName="Card")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 10, 18, 10)
+        layout.setSpacing(4)
+
+        title = QLabel("CANLI TRANSKRİPT")
+        title.setObjectName("SectionTitle")
+        layout.addWidget(title)
+
+        self.transcript_view = QTextEdit()
+        self.transcript_view.setObjectName("Transcript")
+        self.transcript_view.setReadOnly(True)
+        self.transcript_view.setFont(QFont("Segoe UI", 9))
+        self.transcript_view.setFixedHeight(76)
+        layout.addWidget(self.transcript_view)
+
+        self.transcript_card = card
+        return card
+
+    def _build_controls(self) -> QWidget:
+        bar = QFrame(objectName="Bar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(6)
+
+        self.start_button = QPushButton("Start Listening", objectName="Primary")
+        self.pause_button = QPushButton("Pause Listening")
+        self.stop_button = QPushButton("Stop Listening", objectName="Danger")
+        self.pause_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
+        for button in (self.start_button, self.pause_button, self.stop_button):
+            layout.addWidget(button)
+
+        layout.addSpacing(10)
+        self.level_bar = QProgressBar()
+        self.level_bar.setRange(0, 100)
+        self.level_bar.setValue(0)
+        self.level_bar.setTextVisible(False)
+        self.level_bar.setFixedWidth(90)
+        self.level_bar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.level_bar.setToolTip("Sistem səsinin səviyyəsi")
+        layout.addWidget(self.level_bar)
+
+        layout.addStretch(1)
+        self.status_label = QLabel(msg.STATUS_IDLE)
+        self.status_label.setObjectName("Meta")
+        layout.addWidget(self.status_label)
+
+        self.controls_card = bar
+        return bar
 
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&Fayl")
@@ -287,20 +267,77 @@ class MainWindow(QMainWindow):
         self.compact_action = QAction("Compact rejim", self, checkable=True)
         self.compact_action.setShortcut("Ctrl+Shift+C")
         self.compact_action.triggered.connect(self.set_compact)
+        self.transcript_action = QAction("Transkripti göstər", self, checkable=True)
+        self.transcript_action.setShortcut("Ctrl+T")
+        self.transcript_action.setChecked(self.settings.ui.show_transcript)
+        self.transcript_action.triggered.connect(self.set_transcript_visible)
         self.on_top_action = QAction("Həmişə üstdə", self, checkable=True)
         self.on_top_action.setChecked(self.settings.ui.always_on_top)
         self.on_top_action.triggered.connect(self._toggle_always_on_top)
+
+        # Opacity is adjusted mid-call, so it needs keys as well as a slider.
+        less = QAction("Daha şəffaf", self)
+        less.setShortcut("Ctrl+Shift+Down")
+        less.triggered.connect(lambda: self.nudge_opacity(-OPACITY_STEP))
+        more = QAction("Daha tünd", self)
+        more.setShortcut("Ctrl+Shift+Up")
+        more.triggered.connect(lambda: self.nudge_opacity(OPACITY_STEP))
+
         dev_action = QAction("Developer paneli", self)
         dev_action.setShortcut("Ctrl+Shift+D")
         dev_action.triggered.connect(self.show_dev_panel)
         settings_action = QAction("Settings…", self)
         settings_action.setShortcut("Ctrl+,")
         settings_action.triggered.connect(self.open_settings)
-        for action in (self.compact_action, self.on_top_action):
+
+        for action in (self.compact_action, self.transcript_action, self.on_top_action):
+            view_menu.addAction(action)
+        view_menu.addSeparator()
+        for action in (less, more):
             view_menu.addAction(action)
         view_menu.addSeparator()
         view_menu.addAction(dev_action)
         view_menu.addAction(settings_action)
+
+    # =====================================================================
+    # Appearance
+    # =====================================================================
+    def apply_theme(self) -> None:
+        """(Re)build the stylesheet, honouring the configured font scale."""
+        self.setStyleSheet(theme.stylesheet(self.settings.ui.font_scale))
+
+    def _apply_opacity(self, value: float) -> None:
+        low, high = OPACITY_RANGE
+        value = min(high, max(low, float(value)))
+        self.setWindowOpacity(value)
+        return value
+
+    @Slot(float)
+    def set_opacity(self, value: float, persist: bool = True) -> None:
+        """Set window translucency, clamped so the window can never vanish."""
+        applied = self._apply_opacity(value)
+        self.settings.ui.opacity = applied
+        if persist:
+            self.settings.save()
+        if applied < 1.0:
+            self.status_label.setText(f"Şəffaflıq {applied * 100:.0f}%")
+
+    def nudge_opacity(self, delta: float) -> None:
+        self.set_opacity(self.settings.ui.effective_opacity() + delta)
+
+    @Slot(bool)
+    def set_transcript_visible(self, visible: bool, persist: bool = True) -> None:
+        self.settings.ui.show_transcript = bool(visible)
+        # In compact mode the transcript is hidden regardless; the preference is
+        # remembered so leaving compact restores what the user actually chose.
+        self.transcript_card.setVisible(bool(visible) and not self.settings.ui.compact_mode)
+        for control in (self.transcript_button, self.transcript_action):
+            if control.isChecked() != bool(visible):
+                control.blockSignals(True)
+                control.setChecked(bool(visible))
+                control.blockSignals(False)
+        if persist:
+            self.settings.save()
 
     # =====================================================================
     # Wiring
@@ -311,6 +348,7 @@ class MainWindow(QMainWindow):
         self.stop_button.clicked.connect(self.stop_listening)
         self.settings_button.clicked.connect(self.open_settings)
         self.compact_button.toggled.connect(self.set_compact)
+        self.transcript_button.toggled.connect(self.set_transcript_visible)
 
         self.generate_button.clicked.connect(lambda: self.pipeline.generate_answer())
         self.regenerate_button.clicked.connect(self.pipeline.regenerate)
@@ -414,13 +452,12 @@ class MainWindow(QMainWindow):
         body = "<br>".join(_escape(line) for line in lines)
         if self._partial_text:
             partial = _escape(self._partial_text)
-            body += (
-                f"<br><span style='color:#8d94a5;font-style:italic'>{partial}</span>"
-                if body else
-                f"<span style='color:#8d94a5;font-style:italic'>{partial}</span>"
+            span = (
+                f"<span style='color:{theme.TEXT_FAINT};font-style:italic'>{partial}</span>"
             )
+            body = f"{body}<br>{span}" if body else span
         self.transcript_view.setHtml(
-            f"<div style='color:#e6e8ee;line-height:1.5'>{body}</div>"
+            f"<div style='color:{theme.TEXT_DIM};line-height:1.5'>{body}</div>"
         )
         scrollbar = self.transcript_view.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
@@ -428,14 +465,25 @@ class MainWindow(QMainWindow):
     # =====================================================================
     # Question and answer
     # =====================================================================
+    def _set_question_text(self, question: str) -> None:
+        """Swap between the placeholder and real-question styling."""
+        real = bool((question or "").strip())
+        self.question_label.setText(question if real else QUESTION_PLACEHOLDER)
+        name = "Question" if real else "QuestionEmpty"
+        if self.question_label.objectName() != name:
+            self.question_label.setObjectName(name)
+            # Qt does not restyle on an objectName change without a repolish.
+            self.question_label.style().unpolish(self.question_label)
+            self.question_label.style().polish(self.question_label)
+
     @Slot(str)
     def on_question(self, question: str) -> None:
-        self.question_label.setText(question)
+        self._set_question_text(question)
         self._set_answer_actions_enabled(True)
 
     @Slot(str)
     def on_answer_started(self, question: str) -> None:
-        self.question_label.setText(question)
+        self._set_question_text(question)
         self._answer_buffer.clear()
         self._answer_text = ""
         self.answer_view.clear()
@@ -551,6 +599,7 @@ class MainWindow(QMainWindow):
         profile = CandidateProfile.build(self._cv, self._jd)
         self.pipeline.set_profile(profile)
         self.documents_label.setText(profile.describe())
+        self.documents_label.setToolTip(profile.describe())
 
     def _restore_documents(self) -> None:
         for path, kind in (
@@ -566,11 +615,24 @@ class MainWindow(QMainWindow):
     # =====================================================================
     @Slot()
     def open_settings(self) -> None:
+        before = (self.settings.ui.opacity, self.settings.ui.font_scale)
         dialog = SettingsDialog(self.settings, self.credentials, self.bridge, self)
+        # Live preview: dragging the slider should change the window behind it.
+        dialog.opacity_changed.connect(lambda v: self._apply_opacity(v))
         if dialog.exec():
             self.settings.save()
             self.pipeline.settings = self.settings
             self._refresh_provider_labels()
+            if self.settings.ui.font_scale != before[1]:
+                self.apply_theme()
+            self._apply_opacity(self.settings.ui.effective_opacity())
+            self.set_transcript_visible(self.settings.ui.show_transcript, persist=False)
+            self._apply_always_on_top(self.settings.ui.always_on_top)
+            self.on_top_action.setChecked(self.settings.ui.always_on_top)
+        else:
+            # Cancelled: undo whatever the live preview did.
+            self.settings.ui.opacity = before[0]
+            self._apply_opacity(self.settings.ui.effective_opacity())
 
     @Slot()
     def show_dev_panel(self) -> None:
@@ -582,8 +644,13 @@ class MainWindow(QMainWindow):
         self._dev_panel.activateWindow()
 
     def _refresh_provider_labels(self) -> None:
-        self.stt_indicator.set_title(f"ElevenLabs {_pretty_model(self.settings.stt.model_id)}")
-        self.llm_indicator.set_title(get_spec(self.settings.llm.model).label)
+        # Provider name in the bar, exact model in the tooltip: the model id is
+        # long, rarely consulted, and was a third of the old header's width.
+        self.stt_indicator.set_title("ElevenLabs")
+        self.stt_indicator.set_detail(_pretty_model(self.settings.stt.model_id))
+        spec = get_spec(self.settings.llm.model)
+        self.llm_indicator.set_title(spec.label)
+        self.llm_indicator.set_detail(f"{spec.id} · {self.settings.llm.service_tier}")
 
     @Slot(bool)
     def set_compact(self, compact: bool) -> None:
@@ -591,24 +658,28 @@ class MainWindow(QMainWindow):
         if compact and self._normal_geometry is None:
             self._normal_geometry = self.saveGeometry()
 
-        self.transcript_card.setVisible(not compact)
-        self.header_card.setVisible(not compact)
-        self.menuBar().setVisible(not compact)
-        self.settings_button.setVisible(not compact)
-        self.level_bar.setVisible(not compact)
-
-        for widget, action in ((self.compact_button, None), (None, self.compact_action)):
-            if widget is not None and widget.isChecked() != compact:
-                widget.blockSignals(True)
-                widget.setChecked(compact)
-                widget.blockSignals(False)
-            if action is not None and action.isChecked() != compact:
-                action.setChecked(compact)
-
         self.settings.ui.compact_mode = compact
+        self.header_card.setVisible(not compact)
+        self.transcript_card.setVisible(not compact and self.settings.ui.show_transcript)
+        self.menuBar().setVisible(not compact)
+        self.level_bar.setVisible(not compact)
+        self.answer_meta.setVisible(not compact)
+        # Regenerate and Expand are refinements; Pause is something you press
+        # once a session, if ever.  In compact mode the room goes to the answer.
+        self.regenerate_button.setVisible(not compact)
+        self.expand_button.setVisible(not compact)
+        self.pause_button.setVisible(not compact)
+
+        if self.compact_button.isChecked() != compact:
+            self.compact_button.blockSignals(True)
+            self.compact_button.setChecked(compact)
+            self.compact_button.blockSignals(False)
+        if self.compact_action.isChecked() != compact:
+            self.compact_action.setChecked(compact)
+
         if compact:
             self._apply_always_on_top(True)
-            self.resize(520, 420)
+            self.resize(480, 380)
         else:
             self._apply_always_on_top(self.settings.ui.always_on_top)
             if self._normal_geometry is not None:
@@ -626,7 +697,10 @@ class MainWindow(QMainWindow):
         if bool(self.windowFlags() & Qt.WindowStaysOnTopHint) == enabled:
             return
         self.setWindowFlag(Qt.WindowStaysOnTopHint, enabled)
+        # Changing a window flag re-creates the native window, which drops the
+        # opacity Windows had applied to it.
         self.show()
+        self._apply_opacity(self.settings.ui.effective_opacity())
 
     # =====================================================================
     # Shutdown

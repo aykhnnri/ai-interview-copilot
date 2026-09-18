@@ -9,7 +9,7 @@ and streams a suggested answer grounded in your own CV — in about four seconds
 
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D4?logo=windows&logoColor=white)](#-requirements)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](#-requirements)
-[![Tests](https://img.shields.io/badge/tests-451%20passing-2EA043)](#-testing)
+[![Tests](https://img.shields.io/badge/tests-465%20passing-2EA043)](#-testing)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 [![STT](https://img.shields.io/badge/speech-ElevenLabs%20Scribe%20v2%20Realtime-000000)](https://elevenlabs.io/)
@@ -174,6 +174,7 @@ the tail.
 
 | Tab | What it controls |
 |---|---|
+| **Görünüş** | Window transparency, always-on-top, transcript strip, font scale |
 | **Səs** | Loopback device, sample rate sent to ElevenLabs, chunk size, gain |
 | **Tanınma** | Model id, primary/secondary language, VAD sensitivity and silence thresholds, when to answer, turn-merge window, keyterms |
 | **Cavab** | Model, service tier, output token budget, temperature, retained dialogue turns, auto-generate on/off |
@@ -196,18 +197,46 @@ range it refuses the connection outright.
 
 1. Start your interview call — **Teams, Zoom, Meet, Webex**, anything that plays
    audio.
-2. Press **Start Listening**. Both indicators should read `Qoşulub`.
-3. The interviewer's Azerbaijani speech appears live in the transcript panel:
-   grey italic while provisional, solid once finalised.
-4. When a turn is finalised it moves to **AŞKARLANAN SUAL** and the answer
-   begins streaming immediately.
-5. **Regenerate** for a different angle, **Expand Answer** for more depth,
-   **Copy Answer** for the clipboard.
-6. **Compact** (`Ctrl+Shift+C`) shrinks the window to question + answer and pins
-   it above your call.
+2. Press **Start Listening**. Both dots in the status bar turn white.
+3. When the interviewer finishes a turn it appears under **SUAL** and the answer
+   starts streaming underneath it.
+4. **Compact** (`Ctrl+Shift+C`) drops everything except question and answer and
+   pins the window above your call.
+
+The window is built around one idea: **the answer is the only thing you are
+actually reading**, so it gets the space and the largest type. Everything else —
+provider state, documents, controls — is one line of quiet grey chrome.
+
+| | |
+|---|---|
+| `Ctrl+Shift+C` | Compact: question + answer only, pinned on top |
+| `Ctrl+T` | Show / hide the live transcript strip |
+| `Ctrl+Shift+↑` / `↓` | Make the window more / less transparent |
+| `Ctrl+,` | Settings |
+| `Ctrl+Shift+D` | Developer panel |
 
 **Pause Listening** keeps the ElevenLabs connection open for an instant resume.
 **Stop Listening** stops capture, closes the connection and releases the device.
+
+### 🫥 Transparency
+
+The window can be made translucent so it sits **over** the call rather than
+beside it — you read the answer and still see the interviewer through it.
+
+Drag **Settings → Görünüş → Pəncərə şəffaflığı**, or press
+`Ctrl+Shift+↓` mid-call. The slider previews live on the window behind the
+dialog, because choosing a translucency you cannot see is guesswork.
+
+Opacity is clamped to **35–100%**. Below 35% the text stops being readable and,
+worse, the window becomes hard to find again — so a corrupt or fat-fingered
+value is repaired on load rather than obeyed.
+
+### 🎨 The palette
+
+Greyscale, deliberately. The only colour in the application is the error tone,
+because a dead provider has to be distinguishable at a glance and grey cannot
+carry that. Even the primary button is near-white on dark rather than blue — a
+test asserts the palette stays neutral, so an accent colour cannot creep back in.
 
 > The app is **text output only**. It never speaks, and it never plays audio
 > into your call.
@@ -328,7 +357,7 @@ python -m pytest -q --cov=copilot   # with coverage
 ```
 
 ```
-451 passed, 15 skipped in 13.24s
+465 passed, 15 skipped in 14.05s
 ```
 
 The default run uses **no network and no audio hardware**: a fake websocket
@@ -340,7 +369,7 @@ preparation and resampling, partial/committed transcript events, Azerbaijani
 text preservation, question detection, duplicate prevention, OpenAI response
 streaming, CV and job-description handling, settings migration, invalid
 credentials, disconnected audio devices, interrupted connections, rate limits,
-credential storage and log redaction, the benchmark, and the GUI.
+credential storage and log redaction, the benchmark, and the GUI including opacity clamping and the greyscale palette.
 
 ### Live integration tests (billable, opt-in)
 
@@ -371,6 +400,7 @@ python -m pytest -m live -q
 | `core/pipeline.py` | Orchestration on a background asyncio loop |
 | `config.py` | Settings schema, persistence and **version migration** |
 | `env_file.py` | Dependency-free `.env` reader; real environment variables win |
+| `ui/theme.py` | The palette and stylesheet, defined once and scaled by the font setting |
 | `ui/` | Qt widgets; pipeline events arrive as Qt signals |
 
 **Threading.** Qt owns the main thread. All networking runs on one asyncio loop
@@ -497,7 +527,7 @@ Every stage was the production code path. **Nothing was mocked.**
   exact 3200-byte (100 ms) chunks.
 - Resampler — chunk-boundary invariant to 0.0 absolute difference;
   anti-aliasing verified against a 10 kHz tone.
-- **451 automated tests pass** offline; **15 live tests pass** against the real
+- **465 automated tests pass** offline; **15 live tests pass** against the real
   APIs.
 - Both connection tests succeed against the live services, and the OpenAI key is
   correctly *rejected* by ElevenLabs — provider separation proven live.

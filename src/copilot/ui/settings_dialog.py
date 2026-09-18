@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSlider,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -34,6 +35,7 @@ from ..config import (
     LlmSettings,
     KEYTERM_MAX_COUNT,
     KEYTERM_MAX_LENGTH,
+    OPACITY_RANGE,
     SERVICE_TIERS,
     VAD_SILENCE_RANGE,
     Settings,
@@ -201,6 +203,10 @@ class ProviderKeySection(QGroupBox):
 
 
 class SettingsDialog(QDialog):
+    #: Emitted while the opacity slider is dragged, so the window behind the
+    #: dialog updates live.  Choosing a translucency you cannot see is guesswork.
+    opacity_changed = Signal(float)
+
     def __init__(
         self,
         settings: Settings,
@@ -220,6 +226,7 @@ class SettingsDialog(QDialog):
         layout = QVBoxLayout(self)
         tabs = QTabWidget()
         tabs.addTab(self._build_keys_tab(), "API açarları")
+        tabs.addTab(self._build_appearance_tab(), "Görünüş")
         tabs.addTab(self._build_audio_tab(), "Səs")
         tabs.addTab(self._build_stt_tab(), "Tanınma")
         tabs.addTab(self._build_llm_tab(), "Cavab")
@@ -254,6 +261,67 @@ class SettingsDialog(QDialog):
         layout.addWidget(note)
         layout.addStretch(1)
         return page
+
+    def _build_appearance_tab(self) -> QWidget:
+        page = QWidget()
+        form = QFormLayout(page)
+
+        ui = self.settings.ui
+        low, high = OPACITY_RANGE
+
+        # Opacity is a percentage to the user and a float to Qt.  The slider
+        # works in whole percent so the keyboard arrows move it usefully.
+        self.opacity_slider = QSlider(Qt.Horizontal)
+        self.opacity_slider.setRange(int(low * 100), int(high * 100))
+        self.opacity_slider.setValue(int(round(ui.effective_opacity() * 100)))
+        self.opacity_slider.setSingleStep(5)
+        self.opacity_slider.setPageStep(10)
+        self.opacity_value = QLabel(f"{self.opacity_slider.value()}%")
+        self.opacity_value.setMinimumWidth(42)
+
+        row = QHBoxLayout()
+        row.addWidget(self.opacity_slider, 1)
+        row.addWidget(self.opacity_value)
+        holder = QWidget()
+        holder.setLayout(row)
+        form.addRow("Pəncərə şəffaflığı", holder)
+        self.opacity_slider.valueChanged.connect(self._on_opacity_slider)
+
+        form.addRow(_hint(
+            f"{int(high * 100)}% tam qeyri-şəffafdır. Aşağı dəyərlərdə arxadakı "
+            f"görüş pəncərəsi görünür, buna görə proqram zəng üstündə qala bilir. "
+            f"Minimum {int(low * 100)}%-dir: bundan aşağıda mətn oxunmur və "
+            f"pəncərəni yenidən tapmaq çətinləşir. "
+            f"Zəng zamanı Ctrl+Shift+Yuxarı / Aşağı ilə də dəyişdirilə bilər."
+        ))
+
+        self.always_on_top = QCheckBox("Həmişə digər pəncərələrin üstündə")
+        self.always_on_top.setChecked(ui.always_on_top)
+        form.addRow(self.always_on_top)
+
+        self.show_transcript = QCheckBox("Canlı transkript zolağını göstər")
+        self.show_transcript.setChecked(ui.show_transcript)
+        form.addRow(self.show_transcript)
+        form.addRow(_hint(
+            "Transkript diaqnostikadır - nəyin eşidildiyini göstərir. "
+            "Gizlədildikdə bütün yer cavaba qalır (Ctrl+T)."
+        ))
+
+        self.font_scale = QDoubleSpinBox()
+        self.font_scale.setRange(0.8, 1.6)
+        self.font_scale.setSingleStep(0.1)
+        self.font_scale.setDecimals(1)
+        self.font_scale.setValue(ui.font_scale)
+        form.addRow("Şrift ölçüsü", self.font_scale)
+        form.addRow(_hint(
+            "Bütün mətni eyni nisbətdə böyüdür; cavab ən böyük element olaraq qalır."
+        ))
+        return page
+
+    @Slot(int)
+    def _on_opacity_slider(self, percent: int) -> None:
+        self.opacity_value.setText(f"{percent}%")
+        self.opacity_changed.emit(percent / 100.0)
 
     def _build_audio_tab(self) -> QWidget:
         page = QWidget()
@@ -476,6 +544,12 @@ class SettingsDialog(QDialog):
 
     # -- persistence ------------------------------------------------------
     def accept(self) -> None:  # noqa: D102
+        ui = self.settings.ui
+        ui.opacity = self.opacity_slider.value() / 100.0
+        ui.always_on_top = self.always_on_top.isChecked()
+        ui.show_transcript = self.show_transcript.isChecked()
+        ui.font_scale = self.font_scale.value()
+
         audio = self.settings.audio
         audio.device_index = self.device_combo.currentData()
         audio.device_name = self.device_combo.currentText()

@@ -51,6 +51,10 @@ _MIGRATIONS_V2: tuple[tuple[str, str, Any, Any], ...] = (
     ("llm", "model", "gpt-4.1-nano", "gpt-5.6-luna"),
 )
 
+#: Window opacity bounds.  0.35 is about as transparent as text can get while
+#: still being readable over an arbitrary background; 1.0 is fully opaque.
+OPACITY_RANGE = (0.35, 1.0)
+
 VAD_SILENCE_RANGE = (0.3, 3.0)
 VAD_THRESHOLD_RANGE = (0.0, 1.0)
 
@@ -194,6 +198,21 @@ class UiSettings:
     font_scale: float = 1.0
     show_dev_panel: bool = False
     window_geometry: str = ""
+    #: Whole-window opacity.  Below OPACITY_RANGE[0] the window becomes hard to
+    #: read and even harder to find again, so the value is clamped on the way in
+    #: rather than trusted from the settings file.
+    opacity: float = 1.0
+    #: The transcript is diagnostic, not the product.  It stays available, but
+    #: hiding it is a single click because the answer is what you are reading.
+    show_transcript: bool = True
+
+    def effective_opacity(self) -> float:
+        low, high = OPACITY_RANGE
+        try:
+            value = float(self.opacity)
+        except (TypeError, ValueError):
+            return 1.0
+        return min(high, max(low, value))
 
 
 @dataclass

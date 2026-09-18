@@ -262,3 +262,200 @@ def test_the_openai_connection_test_uses_the_configured_model_and_tier(window, q
 
     assert captured.get("model") == "gpt-5.6-luna"
     assert captured.get("service_tier") == "fast"
+
+
+# =========================================================================
+# Appearance: translucency, focus and the palette
+# =========================================================================
+#: Qt stores window opacity as an 8-bit value, so a round-trip lands within
+#: 1/255 of what was asked for.  The stored *setting* is exact; the window is not.
+QUANTISED = dict(abs=1 / 255)
+
+
+def test_opacity_is_clamped_so_the_window_can_never_vanish(window):
+    """A stored or fat-fingered 0.02 would leave an invisible, unfindable window."""
+    from copilot.config import OPACITY_RANGE
+
+    low, high = OPACITY_RANGE
+
+    window.set_opacity(0.02)
+    assert window.windowOpacity() == pytest.approx(low, **QUANTISED)
+    assert window.settings.ui.opacity == pytest.approx(low)
+
+    window.set_opacity(5.0)
+    assert window.windowOpacity() == pytest.approx(high, **QUANTISED)
+
+    window.set_opacity(0.7)
+    assert window.windowOpacity() == pytest.approx(0.7, **QUANTISED)
+
+
+def test_effective_opacity_repairs_a_corrupt_settings_value():
+    from copilot.config import OPACITY_RANGE, UiSettings
+
+    assert UiSettings(opacity=0.01).effective_opacity() == pytest.approx(OPACITY_RANGE[0])
+    assert UiSettings(opacity=9.0).effective_opacity() == pytest.approx(OPACITY_RANGE[1])
+    assert UiSettings(opacity="nonsense").effective_opacity() == pytest.approx(1.0)
+    assert UiSettings(opacity=0.8).effective_opacity() == pytest.approx(0.8)
+
+
+def test_nudging_opacity_steps_and_stops_at_the_floor(window):
+    from copilot.config import OPACITY_RANGE
+    from copilot.ui.main_window import OPACITY_STEP
+
+    window.set_opacity(1.0)
+    window.nudge_opacity(-OPACITY_STEP)
+    assert window.windowOpacity() == pytest.approx(1.0 - OPACITY_STEP, **QUANTISED)
+
+    for _ in range(50):
+        window.nudge_opacity(-OPACITY_STEP)
+    assert window.windowOpacity() == pytest.approx(OPACITY_RANGE[0], **QUANTISED)
+
+
+def test_opacity_survives_toggling_always_on_top(window):
+    """Changing a window flag re-creates the native window and drops opacity."""
+    window.set_opacity(0.6)
+    window._toggle_always_on_top(True)
+    assert window.windowOpacity() == pytest.approx(0.6, **QUANTISED)
+    window._toggle_always_on_top(False)
+    assert window.windowOpacity() == pytest.approx(0.6, **QUANTISED)
+
+
+def test_the_transcript_can_be_hidden_and_the_choice_is_remembered(window):
+    window.show()   # isVisible() on a child is False until the window itself is
+    window.set_transcript_visible(False)
+    assert not window.transcript_card.isVisible()
+    assert not window.settings.ui.show_transcript
+    assert not window.transcript_button.isChecked()
+
+    window.set_transcript_visible(True)
+    assert window.transcript_card.isVisible()
+    assert window.settings.ui.show_transcript
+
+
+def test_leaving_compact_restores_the_transcript_preference_not_a_default(window):
+    """Compact hides the transcript; it must not silently re-enable it after."""
+    window.show()
+    window.set_transcript_visible(False)
+    window.set_compact(True)
+    assert not window.transcript_card.isVisible()
+
+    window.set_compact(False)
+    assert not window.transcript_card.isVisible(), "compact resurrected a hidden strip"
+    assert not window.settings.ui.show_transcript
+
+
+def test_compact_mode_drops_the_secondary_controls(window):
+    window.set_compact(True)
+    assert not window.pause_button.isVisible()
+    assert not window.regenerate_button.isVisible()
+    assert not window.expand_button.isVisible()
+    assert window.generate_button.isVisible()
+    assert window.copy_button.isVisible()
+    assert window.stop_button.isVisible()
+
+    window.set_compact(False)
+    assert window.pause_button.isVisible()
+    assert window.regenerate_button.isVisible()
+
+
+def test_the_question_placeholder_is_styled_apart_from_a_real_question(window):
+    from copilot.ui.main_window import QUESTION_PLACEHOLDER
+
+    assert window.question_label.text() == QUESTION_PLACEHOLDER
+    assert window.question_label.objectName() == "QuestionEmpty"
+
+    window.on_question("RAG nədir?")
+    assert window.question_label.objectName() == "Question"
+    assert window.question_label.text() == "RAG nədir?"
+
+
+def test_the_model_id_lives_in_the_tooltip_not_the_bar(window):
+    """The bar names the provider; the exact model is looked up, not stared at."""
+    assert window.stt_indicator._title.text() == "ElevenLabs"
+    assert "Scribe" in window.stt_indicator.toolTip()
+    assert window.settings.llm.service_tier in window.llm_indicator.toolTip()
+
+
+# -- the palette ----------------------------------------------------------
+def _spread(hex_colour: str) -> int:
+    value = hex_colour.lstrip("#")
+    r, g, b = (int(value[i:i + 2], 16) for i in (0, 2, 4))
+    return max(r, g, b) - min(r, g, b)
+
+
+def test_the_palette_is_greyscale_apart_from_the_error_tone():
+    """A blue 'primary' creeping back in is exactly the regression to catch."""
+    from copilot.ui import theme
+
+    neutral = {
+        name: value
+        for name, value in vars(theme).items()
+        if name.isupper() and isinstance(value, str) and value.startswith("#")
+        and name != "ERROR"
+    }
+    assert neutral, "no colours found - did the theme move?"
+    offenders = {n: v for n, v in neutral.items() if _spread(v) > 12}
+    assert not offenders, f"non-grey colours in the palette: {offenders}"
+    assert _spread(theme.ERROR) > 40, "the error tone must stay distinguishable"
+
+
+def test_the_answer_is_the_largest_text_in_the_window():
+    """The layout's whole premise: the answer outranks everything else."""
+    import re
+
+    from copilot.ui import theme
+
+    sheet = theme.stylesheet()
+
+    def size_of(selector: str) -> int:
+        block = sheet.split(selector, 1)[1].split("}", 1)[0]
+        return int(re.search(r"font-size:\s*(\d+)px", block).group(1))
+
+    answer = size_of("QTextEdit#Answer")
+    question = size_of("QLabel#Question ")
+    transcript = size_of("QTextEdit#Transcript")
+    assert answer > question > transcript
+
+
+def test_font_scale_scales_every_size_together():
+    from copilot.ui import theme
+
+    normal = theme.stylesheet(1.0)
+    large = theme.stylesheet(1.5)
+    assert "font-size: 16px" in normal          # the answer at 1.0
+    assert "font-size: 24px" in large           # and at 1.5
+    assert normal != large
+
+
+def test_settings_dialog_writes_the_appearance_tab_back(window, qapp):
+    from copilot.ui.settings_dialog import SettingsDialog
+
+    dialog = SettingsDialog(window.settings, window.credentials, window.bridge, window)
+    try:
+        dialog.opacity_slider.setValue(70)
+        dialog.show_transcript.setChecked(False)
+        dialog.always_on_top.setChecked(True)
+        dialog.font_scale.setValue(1.2)
+        dialog.accept()
+    finally:
+        dialog.deleteLater()
+
+    assert window.settings.ui.opacity == pytest.approx(0.70)
+    assert window.settings.ui.show_transcript is False
+    assert window.settings.ui.always_on_top is True
+    assert window.settings.ui.font_scale == pytest.approx(1.2)
+
+
+def test_the_opacity_slider_previews_live(window, qapp):
+    """Picking a translucency you cannot see is guesswork."""
+    from copilot.ui.settings_dialog import SettingsDialog
+
+    seen: list[float] = []
+    dialog = SettingsDialog(window.settings, window.credentials, window.bridge, window)
+    try:
+        dialog.opacity_changed.connect(seen.append)
+        dialog.opacity_slider.setValue(55)
+        assert seen and seen[-1] == pytest.approx(0.55)
+        assert dialog.opacity_value.text() == "55%"
+    finally:
+        dialog.deleteLater()
